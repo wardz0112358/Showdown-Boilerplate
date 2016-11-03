@@ -310,26 +310,27 @@ class CommandContext {
 		return result;
 	}
 
-	checkFormat(room, message) {
-		if (!room) return false;
-		if (!room.filterStretching && !room.filterCaps) return false;
-		let formatError = [];
+	checkFormat(room, user, message) {
+		if (!room) return true;
+		if (!room.filterStretching && !room.filterCaps) return true;
+
+		if (room.filterStretching && user.name.match(/(.+?)\1{5,}/i)) {
+			return this.errorReply(`Your username contains too much stretching, which this room doesn't allow.`);
+		}
+		if (room.filterCaps && user.name.match(/[A-Z\s]{6,}/)) {
+			return this.errorReply(`Your username contains too many capital letters, which this room doesn't allow.`);
+		}
 		// Removes extra spaces and null characters
 		message = message.trim().replace(/[ \u0000\u200B-\u200F]+/g, ' ');
 
-		let stretchMatch = room.filterStretching && message.match(/(.+?)\1{7,}/i);
-		let capsMatch = room.filterCaps && message.match(/[A-Z\s]{18,}/);
+		if (room.filterStretching && message.match(/(.+?)\1{7,}/i) && !user.can('mute', null, room)) {
+			return this.errorReply(`Your message contains too much stretching, which this room doesn't allow.`);
+		}
+		if (room.filterCaps && message.match(/[A-Z\s]{18,}/) && !user.can('mute', null, room)) {
+			return this.errorReply(`Your message contains too many capital letters, which this room doesn't allow.`);
+		}
 
-		if (stretchMatch) {
-			formatError.push("too much stretching");
-		}
-		if (capsMatch) {
-			formatError.push("too many capital letters");
-		}
-		if (formatError.length > 0) {
-			return formatError.join(' and ') + ".";
-		}
-		return false;
+		return true;
 	}
 
 	checkSlowchat(room, user) {
@@ -536,9 +537,10 @@ class CommandContext {
 		}
 		if (!user.can('bypassall')) {
 			let lockType = (user.namelocked ? `namelocked` : user.locked ? `locked` : ``);
+			let lockExpiration = Punishments.checkLockExpiration(user.namelocked || user.locked);
 			if (room) {
 				if (lockType) {
-					this.errorReply(`You are ${lockType} and can't talk in chat.`);
+					this.errorReply(`You are ${lockType} and can't talk in chat. ${lockExpiration}`);
 					return false;
 				}
 				if (room.isMuted(user)) {
@@ -561,7 +563,7 @@ class CommandContext {
 			}
 			if (targetUser) {
 				if (lockType && !targetUser.can('lock')) {
-					return this.errorReply(`You are ${lockType} and can only private message members of the global moderation team (users marked by @ or above in the Help room).`);
+					return this.errorReply(`You are ${lockType} and can only private message members of the global moderation team (users marked by @ or above in the Help room). ${lockExpiration}`);
 				}
 				if (targetUser.locked && !user.can('lock')) {
 					return this.errorReply(`The user "${targetUser.name}" is locked and cannot be PMed.`);
@@ -602,8 +604,7 @@ class CommandContext {
 				return false;
 			}
 
-			if (this.checkFormat(room, message) && !user.can('mute', null, room)) {
-				this.errorReply("Your message was not sent because it contained " + this.checkFormat(room, message));
+			if (!this.checkFormat(room, user, message)) {
 				return false;
 			}
 
@@ -875,11 +876,12 @@ Chat.escapeHTML = function (str) {
  * @param  {...any} values
  * @return {string}
  */
-Chat.html = function (strings) {
+Chat.html = function (strings, ...args) {
 	let buf = strings[0];
-	for (let i = 1; i < arguments.length; i++) {
-		buf += Chat.escapeHTML(arguments[i]);
-		buf += strings[i];
+	let i = 0;
+	while (i < args.length) {
+		buf += Chat.escapeHTML(args[i]);
+		buf += strings[++i];
 	}
 	return buf;
 };
